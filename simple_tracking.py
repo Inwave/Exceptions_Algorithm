@@ -1,5 +1,6 @@
 from frame_capture import FrameDecoder
 from detection_analysis import Detector
+from profiler import profiled
 
 import numpy as np
 import cv2
@@ -33,6 +34,9 @@ class SimpleTracking:
         self.display_scale = config.get("display_scale", 1)
         self.detector = detector
 
+        self.width, self.height = self._get_video_resolution()
+
+
         # ✅ State per class
         self.positions = {cls: deque(maxlen=self.smoothing_window) for cls in self.target_classes}
         self.deviation_flags = {cls: deque(maxlen=self.movement_window) for cls in self.target_classes}
@@ -51,7 +55,7 @@ class SimpleTracking:
             config = yaml.safe_load(f)
         return config.get("simpletracking", {})
     
-
+    @profiled
     def _get_video_resolution(self):
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
@@ -64,7 +68,7 @@ class SimpleTracking:
     def _bbox_center(self, bbox):
         x1, y1, x2, y2 = bbox
         return (x1 + x2) / 2, (y1 + y2) / 2
-
+    @profiled
     def _smooth_position(self, cls: str, new_pos):
         """Exponential smoothing per class."""
         if not self.positions[cls]:
@@ -76,7 +80,7 @@ class SimpleTracking:
         smoothed = (smoothed_x, smoothed_y)
         self.positions[cls].append(smoothed)
         return smoothed
-
+    @profiled
     def _detect_movement_pattern(self, cls: str, current_center: Tuple[float, float]) -> bool:
         """Detect movement if several consecutive deviations exceed threshold."""
         if len(self.positions[cls]) < 2:
@@ -88,8 +92,7 @@ class SimpleTracking:
         dist = np.linalg.norm(np.array(current_center) - mean_center)
 
         #Normalization:
-        width, height = self._get_video_resolution()
-        diagonal = np.sqrt(width ** 2 + height ** 2)
+        diagonal = np.sqrt(self.width ** 2 + self.height ** 2)
 
         normalized_dist = dist / diagonal
 
@@ -97,7 +100,7 @@ class SimpleTracking:
         count = sum(self.deviation_flags[cls])
         return count >= self.min_movement_count
 
-
+    @profiled
 
     def _is_inside_roi(self, bbox: List[int]) -> bool:
         """Check if a bounding box intersects any ROI."""
@@ -111,6 +114,7 @@ class SimpleTracking:
         return False
 
     # -------------------------------------------------------------------------------------
+    @profiled
     def run(self, show_video: bool = True, save_path: Optional[str] = None, verbose: bool = True):
 
         decoder = FrameDecoder(self.video_path, frame_skip=self.frame_skip, resize=self.resize)
@@ -332,6 +336,8 @@ class RTSPSimpleTracker:
         self.positions = {}
         self.deviation_flags = {}        
         self.movement_display_timer = {}
+        self.width, self.height = self._get_video_resolution()
+
     
     def _get_video_resolution(self):
         cap = cv2.VideoCapture(self.video_path)
@@ -378,8 +384,7 @@ class RTSPSimpleTracker:
         mean_center = np.array([mean_x, mean_y])
         dist = np.linalg.norm(np.array(current_center) - mean_center)
 
-        width, height = self._get_video_resolution()
-        diagonal = np.sqrt(width ** 2 + height ** 2)
+        diagonal = np.sqrt(self.width ** 2 + self.height ** 2)
 
         normalized_dist = dist / diagonal
 
