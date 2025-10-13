@@ -5,52 +5,61 @@ import numpy as np
 import cv2
 from collections import deque
 from typing import Optional, Tuple, List, Dict, Any
+import datetime
+import yaml
+
+
+DEFAULT_COLORS = {
+    'scanner':(255, 0, 0),'hand': (0, 255, 0),'rag' :(0, 0, 255),'plastic-bag':(255, 255, 0), 'products':(0, 255, 255), 'price-sheets':(255, 0, 255)}
+
 
 class SimpleTracking:
     def __init__(
         self,
-        video_path: str,
-        detector: Any,
-        target_classes: List[str],
-        roi: Optional[List[Tuple[int, int, int, int]]] = None,  # list of [x1,y1,x2,y2]
-        frame_skip: int = 0,
-        resize: Optional[Tuple[int, int]] = None,
-        movement_threshold: float = 30.0,
-        smoothing_window: int = 5,
-        alpha: float = 0.8,
-        min_movement_count: int = 5,
-        movement_window: int = 15,
-        display_scale: float = 1.0,
+        config_path: str,
+        detector: Any,    
     ):
-        self.video_path = video_path
+        config = self.load_config(config_path)
+        self.video_path = config.get("video_path", 'video/path/mp4')
+        self.target_classes = config.get("target_classes", [])
+        self.roi = config.get("roi", None)
+        self.frame_skip = config.get("frame_skip", 0)
+        self.resize = None
+        self.movement_threshold = config.get("movement_threshold", 0.015)
+        self.smoothing_window = config.get("smoothing_window", 25)
+        self.alpha = config.get("alpha", 0.8)
+        self.min_movement_count = config.get("min_movement_count", 5)
+        self.movement_window = config.get("movement_window", 12)
+        self.display_scale = config.get("display_scale", 1)
         self.detector = detector
-        self.target_classes = target_classes
-        self.roi = roi
-        self.frame_skip = frame_skip
-        self.resize = resize
-        self.movement_threshold = movement_threshold
-        self.smoothing_window = smoothing_window
-        self.alpha = alpha
-        self.min_movement_count = min_movement_count
-        self.movement_window = movement_window
-        self.display_scale = display_scale
 
         # ✅ State per class
-        self.positions = {cls: deque(maxlen=smoothing_window) for cls in target_classes}
-        self.deviation_flags = {cls: deque(maxlen=movement_window) for cls in target_classes}
-        self.tracking_data = {cls: [] for cls in target_classes}
-        self.movement_display_timer = {cls: 0 for cls in target_classes}
+        self.positions = {cls: deque(maxlen=self.smoothing_window) for cls in self.target_classes}
+        self.deviation_flags = {cls: deque(maxlen=self.movement_window) for cls in self.target_classes}
+        self.tracking_data = {cls: [] for cls in self.target_classes}
+        self.movement_display_timer = {cls: 0 for cls in self.target_classes}
 
         # Custom alert colors per class
-        self.class_colors = {
-            cls: tuple(np.random.randint(50, 255, 3).tolist()) for cls in target_classes
-        }
+        self.class_colors = DEFAULT_COLORS
 
         # Custom alert messages
         self.alert_messages = {
-            cls: f"MOVEMENT DETECTED: {cls.upper()}!" for cls in target_classes
+            cls: f"MOVEMENT DETECTED: {cls.upper()}!" for cls in self.target_classes
         }
+    def load_config(cls, config_path: str) -> Dict[str, Any]:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        return config.get("simpletracking", {})
+    
 
+    def _get_video_resolution(self):
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            return None
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        return (width, height)
     # -------------------------------------------------------------------------
     def _bbox_center(self, bbox):
         x1, y1, x2, y2 = bbox
@@ -78,9 +87,17 @@ class SimpleTracking:
         mean_center = np.array([mean_x, mean_y])
         dist = np.linalg.norm(np.array(current_center) - mean_center)
 
-        self.deviation_flags[cls].append(dist > self.movement_threshold)
+        #Normalization:
+        width, height = self._get_video_resolution()
+        diagonal = np.sqrt(width ** 2 + height ** 2)
+
+        normalized_dist = dist / diagonal
+
+        self.deviation_flags[cls].append(normalized_dist > self.movement_threshold)
         count = sum(self.deviation_flags[cls])
         return count >= self.min_movement_count
+
+
 
     def _is_inside_roi(self, bbox: List[int]) -> bool:
         """Check if a bounding box intersects any ROI."""
@@ -93,11 +110,21 @@ class SimpleTracking:
                 return True
         return False
 
-    # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------------------
     def run(self, show_video: bool = True, save_path: Optional[str] = None, verbose: bool = True):
 
         decoder = FrameDecoder(self.video_path, frame_skip=self.frame_skip, resize=self.resize)
-        movement_detected = {cls: False for cls in self.target_classes}
+        movement_info = {
+            cls: {
+                "detected": False,
+                "movement_count": 0,
+                "movements": [],
+                "_active": False,  # interne : indique si un mouvement est en cours
+                "_start_frame": None,
+                "_start_time": None
+            }
+            for cls in self.target_classes
+        }
 
         writer = None
         if save_path:
@@ -133,11 +160,51 @@ class SimpleTracking:
                 })
 
                 # Detect movement
-                if self._detect_movement_pattern(cls, smooth_center):
-                    movement_detected[cls] = True
-                    self.movement_display_timer[cls] = 15
+                is_moving = self._detect_movement_pattern(cls, smooth_center)
+
+                cls_state = movement_info[cls]
+
+                # --- Start of global movement ---
+                if is_moving and not cls_state["_active"]:
+                    cls_state["_active"] = True
+                    cls_state["_start_frame"] = idx
+                    cls_state["_start_time"] = timestamp
                     if verbose:
-                        print(f"[Frame {idx}] Movement confirmed for '{cls}' at {timestamp:.2f}s")
+                        print(f"[Frame {idx}]  Starting movement '{cls}' à {timestamp:.2f}s")
+                    
+
+                elif not is_moving and cls_state["_active"]:
+                    cls_state["_active"] = False
+                    start_frame = cls_state["_start_frame"]
+                    start_time = cls_state["_start_time"]
+                    duration_s = timestamp - start_time
+                    frame_count = idx - start_frame + 1
+
+                    cls_state["movements"].append({
+                        "start_frame": start_frame,
+                        "end_frame": idx,
+                        "start_timestamp": start_time,
+                        "end_timestamp": timestamp,
+                        "duration_s": duration_s,
+                        "frame_count": frame_count
+                    })
+                    cls_state["movement_count"] += 1
+                    cls_state["detected"] = True
+
+                    if verbose:
+                        print(f"[Frame {idx}] End of Movement '{cls}' at {timestamp:.2f}s "
+                            f"(Duration: {duration_s:.2f}s, {frame_count} frames)")
+                    
+                if cls_state["_active"]:
+                    msg = self.alert_messages[cls]
+                    cv2.putText(
+                        vis_frame, msg, (30, 50 + 40 * list(self.target_classes).index(cls)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3, cv2.LINE_AA
+                    )
+
+
+
+
 
                 # --- Visualization ---
                 color = self.class_colors[cls]
@@ -178,18 +245,46 @@ class SimpleTracking:
             if writer:
                 writer.write(vis_frame)
 
+        for cls, cls_state in movement_info.items():
+            if cls_state["_active"]:
+                last_frame = self.tracking_data[cls][-1]["frame_idx"]
+                last_time = self.tracking_data[cls][-1]["timestamp"]
+                start_frame = cls_state["_start_frame"]
+                start_time = cls_state["_start_time"]
+                duration_s = last_time - start_time
+                frame_count = last_frame - start_frame + 1
+                cls_state["movements"].append({
+                    "start_frame": start_frame,
+                    "end_frame": last_frame,
+                    "start_timestamp": start_time,
+                    "end_timestamp": last_time,
+                    "duration_s": duration_s,
+                    "frame_count": frame_count
+                })
+                cls_state["movement_count"] += 1
+                cls_state["detected"] = True
+
+            # Nettoyage des variables internes
+            del cls_state["_active"]
+            del cls_state["_start_frame"]
+            del cls_state["_start_time"]
+
+        if verbose:
+            print("Movement detected:", movement_info)
+
+
         decoder.release()
         if writer:
             writer.release()
         cv2.destroyAllWindows()
 
         return {
-            "movement_detected": movement_detected,
+            "movement_detected": movement_info,
             "tracking_data": self.tracking_data
         }
 
-DEFAULT_COLORS = {
-    'scanner':(255, 0, 0),'hand': (0, 255, 0),'rag' :(0, 0, 255),'plastic-bag':(255, 255, 0), 'products':(0, 255, 255), 'price-sheets':(255, 0, 255)}
+
+
 
 
 def draw_detections(frame, boxes, clss, confs, names, color=(0, 255, 0)):
@@ -237,7 +332,16 @@ class RTSPSimpleTracker:
         self.positions = {}
         self.deviation_flags = {}        
         self.movement_display_timer = {}
-
+    
+    def _get_video_resolution(self):
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            return None
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        return (width, height)
+    
     def _bbox_center(self, bbox):
         x1, y1, x2, y2 = bbox
         return (x1 + x2) / 2, (y1 + y2) / 2
@@ -274,7 +378,12 @@ class RTSPSimpleTracker:
         mean_center = np.array([mean_x, mean_y])
         dist = np.linalg.norm(np.array(current_center) - mean_center)
 
-        self.deviation_flags[cls_name].append(dist > self.movement_threshold)
+        width, height = self._get_video_resolution()
+        diagonal = np.sqrt(width ** 2 + height ** 2)
+
+        normalized_dist = dist / diagonal
+
+        self.deviation_flags[cls_name].append(normalized_dist > self.movement_threshold)
         count = sum(self.deviation_flags[cls_name])
         return count >= self.min_movement_count
 
@@ -295,8 +404,17 @@ class RTSPSimpleTracker:
         confs = r.boxes.conf.cpu().numpy()
         names = r.names if hasattr(r, "names") else self.model.names
         all_tracked_boxes = []
-        class_movements = {}
-
+        movement_info = {
+            cls: {
+                "detected": False,
+                "movement_count": 0,
+                "movements": [],
+                "_active": False,  # interne : indique si un mouvement est en cours
+                "_start_frame": None,
+                "_start_time": None
+            }
+            for cls in self.target_classes
+        }
         # --- loop through each target class ---
         for target_class in self.target_classes:
             # ensure per-class buffers exist
@@ -333,11 +451,35 @@ class RTSPSimpleTracker:
                 cv2.line(frame, p1, p2, color, 2)
 
             # detect movement per class
-            moved = self._detect_movement_pattern(smooth_center, target_class)
-            class_movements[target_class] = moved
+            is_moving = self._detect_movement_pattern(smooth_center, target_class)
+            cls_state=movement_info[target_class]
+            if is_moving and not cls_state['_active'] :
+                cls_state["_active"] = True
+                cls_state["_start_time"] = datetime.now()
 
-            if moved:
-                self.movement_display_timer[target_class] = 15
+            elif not is_moving and cls_state["_active"]:
+                cls_state["_active"] = False
+                start_time = cls_state["_start_time"]
+                end_time = datetime.now()
+                duration_s = end_time - start_time
+
+                cls_state["movements"].append({
+                    "start_timestamp": start_time,
+                    "end_timestamp": end_time,
+                    "duration_s": duration_s,
+                })
+                cls_state["movement_count"] += 1
+                cls_state["detected"] = True
+            if cls_state["_active"]:
+                msg = self.alert_messages[target_class]
+                cv2.putText(
+                    frame, msg, (30, 50 + 40 * list(self.target_classes).index(target_class)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3, cv2.LINE_AA
+                )
+
+                
+                
+                
 
         # --- draw all detections ---
         if all_tracked_boxes:
@@ -354,11 +496,11 @@ class RTSPSimpleTracker:
         for cls_name, timer in self.movement_display_timer.items():
             if timer > 0:
                 color = DEFAULT_COLORS[cls_name]
-                alert_text = f"⚠️ Movement detected: {cls_name.upper()}"
+                alert_text = f" Movement detected: {cls_name.upper()}"
                 cv2.putText(frame, alert_text, (30, y_offset),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3, cv2.LINE_AA)
                 self.movement_display_timer[cls_name] -= 1
                 y_offset += 40
 
-        return frame, class_movements
+        return frame, movement_info
 

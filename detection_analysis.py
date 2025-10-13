@@ -7,18 +7,24 @@ from contextlib import suppress
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.colors import hsv_to_rgb
+import yaml
 
 from frame_capture import FrameDecoder
 
 
 class Detector:
-    def __init__(self, model_path: str, conf_threshold: float = 0.15, device: str = "cpu"):
-        self.model_path = model_path
+    def __init__(self,config_path):
+        config=self.load_config(config_path)
+        self.model_path = config.get("model_path", "")
         self.model = YOLO(self.model_path)
-        self.conf_threshold = conf_threshold
-        self.device = device
+        self.conf_threshold = config.get("conf_threshold", 0.3)
+        self.device = config.get("device", "cpu")
         self.classes = self.model.names
         
+    def load_config(self, config_path):
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        return config.get('detector', {})
 
     def detect_frame(self, frame) -> List[Dict[str, Any]]:
         results = self.model(frame, verbose=False)[0]

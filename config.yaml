@@ -1,0 +1,23 @@
+# Config file 
+
+simpletracking:
+  video_path: "videos/video_CarrefourSP_TBE1_20250916T195008_15.mp4"
+  target_classes: ["scanner", "rag", 'plastic-bag']
+  roi: [[646, 164, 848, 301], [400, 400, 600, 600]]   # Optionnal (leave None : ROI=Full frame)
+  frame_skip: 0
+  resize: None   # Optionnal
+  movement_threshold: 0.01
+  smoothing_window: 25
+  alpha: 0.8
+  min_movement_count: 7
+  movement_window: 9
+  display_scale: 1.0
+
+detector:
+  model_path: "models/final_best_103.pt"
+  conf_threshold: 0.35  
+  device: 'cpu'
+
+verdict:
+  min_duration: 0.5
+  self.min_movement_count: 1

@@ -11,16 +11,18 @@ def open_source(source, is_rtsp=False):
         except Exception:
             pass
     else:
+        print('vifdeoS')
         cap = cv2.VideoCapture(source)
     return cap
 
 
-def grab_first_frame(cap, retries=5):
+def grab_first_frame(cap, retries=20):
     for i in range(retries):
         ret, frame = cap.read()
+        print(ret, frame)
         if ret and frame is not None:
             return frame
-        time.sleep(0.5)
+        time.sleep(0.2)
     raise RuntimeError("Impossible to get frame from source")
 
 
