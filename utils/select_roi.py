@@ -11,7 +11,6 @@ def open_source(source, is_rtsp=False):
         except Exception:
             pass
     else:
-        print('vifdeoS')
         cap = cv2.VideoCapture(source)
     return cap
 
@@ -40,7 +39,7 @@ def select_roi_from_frame(frame):
 
     x, y, w, h = roi
     x1, y1, x2, y2 = int(x), int(y), int(x + w), int(y + h)
-    print(f"\n✅ ROI sélectionnée : (x1={x1}, y1={y1}, x2={x2}, y2={y2})\n")
+    print(f"\nROI selected : (x1={x1}, y1={y1}, x2={x2}, y2={y2})\n")
     return [x1, y1, x2, y2]
 
 

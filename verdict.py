@@ -7,12 +7,11 @@ class Verdict:
     
     """
 
-    def __init__(self, movement_data: dict, config_path):
+    def __init__(self, config_path):
         """
         Args:
             movement_data (dict): Dict with details of the differents movement detected by the SimpleTracker class
         """
-        self.data = movement_data
         config=self.load_config(config_path)
         self.min_duration = config.get("min_duration", 0.5) #min_duration
         self.min_movement_count = config.get("min_movement_count", 1)
@@ -23,7 +22,7 @@ class Verdict:
         return config.get('verdict', {})
     
 
-    def analyze(self) -> dict:
+    def analyze(self, movement_data) -> dict:
         """
         Analyze movements of each class and return global verdict
         """
@@ -33,6 +32,7 @@ class Verdict:
             "details": {}
         }
 
+        self.data = movement_data
         for cls, info in self.data.items():
             significant_movements = [
                 m for m in info.get("movements", [])
@@ -57,11 +57,11 @@ class Verdict:
         return result
     
     def alert_message(self, class_list):
-        return f"Significant movement if Non-Products Objects detected in ROI for classes: {', '.join(class_list)}"
+        return f"Significant movement of Non-Products Objects detected in ROI for classes: {', '.join(class_list)}"
 
     
-    def verdict_message(self):
-        results=self.analyze()
+    def verdict_message(self, movement_data):
+        results=self.analyze(movement_data)
         if results["significant_movement"]:
             return self.alert_message(results["classes_moved"])
         else:

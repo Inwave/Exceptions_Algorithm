@@ -8,7 +8,6 @@ __pycache__/
 
 annotated_videos/
 videos/
-profiler.py
 run.py
 tracking_module.py
 trajectory_visualizer.py

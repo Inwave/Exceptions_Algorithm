@@ -9,7 +9,6 @@ import matplotlib.patches as patches
 from matplotlib.colors import hsv_to_rgb
 import yaml
 
-from frame_capture import FrameDecoder
 
 
 class Detector:
