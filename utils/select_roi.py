@@ -15,14 +15,45 @@ def open_source(source, is_rtsp=False):
     return cap
 
 
-def grab_first_frame(cap, retries=20):
-    for i in range(retries):
+def select_frame_for_roi(cap):
+    """
+    Let user scroll frame by frame to pick the frame to select ROI.
+    Left/Right arrows: previous/next frame
+    Enter: select current frame for ROI
+    Q: quit without selection
+    """
+    frames = []
+    current_idx = 0
+
+    # Read all frames into memory for easy navigation (can optimize for long videos if needed)
+    while True:
         ret, frame = cap.read()
-        print(ret, frame)
-        if ret and frame is not None:
-            return frame
-        time.sleep(0.2)
-    raise RuntimeError("Impossible to get frame from source")
+        if not ret:
+            break
+        frames.append(frame)
+    total_frames = len(frames)
+
+    if total_frames == 0:
+        raise RuntimeError("No frames found in video")
+
+    while True:
+        display_frame = frames[current_idx].copy()
+        cv2.putText(display_frame, f"Frame {current_idx + 1}/{total_frames} - Left/Right to navigate, Enter=select, Q=quit",
+                    (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.imshow("Frame Selector", display_frame)
+        key = cv2.waitKey(0) & 0xFF
+
+        if key == 81 or key == ord('a'):  # Left arrow / 'a'
+            current_idx = max(0, current_idx - 1)
+        elif key == 83 or key == ord('d'):  # Right arrow / 'd'
+            current_idx = min(total_frames - 1, current_idx + 1)
+        elif key == 13:  # Enter key
+            cv2.destroyWindow("Frame Selector")
+            return frames[current_idx]
+        elif key == ord('q'):
+            cv2.destroyWindow("Frame Selector")
+            return None
+
 
 
 def select_roi_from_frame(frame):
@@ -44,30 +75,31 @@ def select_roi_from_frame(frame):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ROI Selector on RTSP flux or local video")
+    parser = argparse.ArgumentParser(description="ROI Selector on RTSP stream or local video")
     parser.add_argument("--video", help="path of local video")
     parser.add_argument("--rtsp", help="URL RTSP")
     args = parser.parse_args()
 
     if not args.video and not args.rtsp:
-        parser.error("Must precise --video <path> ou --rtsp <url>")
+        parser.error("Must specify --video <path> or --rtsp <url>")
 
     is_rtsp = args.rtsp is not None
     source = args.rtsp if is_rtsp else args.video
 
-    print(" Opening video source")
+    print("Opening video source...")
     cap = open_source(source, is_rtsp=is_rtsp)
-    frame = grab_first_frame(cap)
+
+    frame = select_frame_for_roi(cap)
     cap.release()
 
-    roi = select_roi_from_frame(frame)
-
-    if roi:
-        
-        print(f"ROI = {roi}")
+    if frame is not None:
+        roi = select_roi_from_frame(frame)
+        if roi:
+            print(f"ROI = {roi}")
+        else:
+            print("No ROI selected")
     else:
-        print("No ROI")
-
+        print("No frame selected for ROI")
 
 if __name__ == "__main__":
     main()
