@@ -21,3 +21,24 @@ detector:
 verdict:
   min_duration: 0.5
   self.min_movement_count: 1
+
+
+persistentwatcher:
+  model_path: "models/final_best_103.pt"
+  conf_threshold: 0.35  
+  device: 'cpu'
+  target_classes:
+    - plastic-bag
+    - products
+    - scanner
+    - rag
+  roi: [688, 333, 793, 399]
+  time_threshold: 1.0
+  smoothing_window: 7
+  alpha: 0.8
+  display_scale: 1.0
+  motion_threshold: 0.1       
+  stability_time: 2.0         
+  alert_time: 2.0             
+  display_scale: 1.0
+  disappearance_window: 10
