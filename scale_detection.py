@@ -1,11 +1,18 @@
+import time
+
+start_time = time.time()
+
 import cv2
 import yaml
-import time
 import numpy as np
 from collections import deque
 from typing import Any, Dict, List, Optional, Tuple
 from frame_capture import FrameDecoder
 from detection_analysis import Detector
+from profiler import profiled
+
+end_time = time.time()
+print('import time', end_time - start_time)
 
 class PersistentObjectWatcher:
     def __init__(
@@ -49,7 +56,7 @@ class PersistentObjectWatcher:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
         return config.get("persistentwatcher", {})
-
+    @profiled
     def _get_video_resolution(self) -> Tuple[int, int]:
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
@@ -78,7 +85,7 @@ class PersistentObjectWatcher:
             return 0.0
 
         return intersection_area / smallest_area
-
+    @profiled
     def _is_inside_roi(self, bbox: List[int]) -> bool:
         if self.roi is None:
             return False
@@ -109,7 +116,7 @@ class PersistentObjectWatcher:
         iou = intersection_area / union_area
         
         return iou
-    
+    @profiled
     def detect_background_based_immobility(
         self,
         show_video=True,
@@ -297,10 +304,10 @@ class PersistentObjectWatcher:
             "immobility_sequences": immobility_sequences
         }
 
-
+    @profiled
     def detect_immobility_with_classification(
         self,
-        show_video=True,
+        show_video=False,
         save_path=None,
         display_scale=1.0,
         alert_color=(0, 0, 255),
@@ -492,5 +499,5 @@ if __name__ == "__main__":
     config_path='config.yaml'
     detector=Detector(config_path)
     scale_detection=PersistentObjectWatcher(config_path, detector, 'videos/video_CarrefourSP_TBE1_20250917T164539_16.mp4')
-    result=scale_detection.detect_immobility_with_classification(show_video=True)
+    result=scale_detection.detect_immobility_with_classification(show_video=False)
     print(result)
