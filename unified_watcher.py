@@ -7,27 +7,30 @@ from frame_capture import FrameDecoder
 from detection_analysis import Detector
 from profiler import profiled
 
+
 DEFAULT_COLORS = {
     'scanner':(255, 0, 0), 'hand': (0, 255, 0), 'rag' :(0, 0, 255),
     'plastic-bag':(255, 255, 0), 'products':(0, 255, 255), 'price-sheets':(255, 0, 255)
 }
 
+# Class regrouping the tracking algorithm and the immobility-detection algorithm
+# Run simultaneously both on each frame
 class UnifiedWatcher:
     def __init__(self, config_path: str, detector: Any, video_path: str):
         self.video_path = video_path
         self.detector = detector
 
-        # --- Charger la config ---
+        # load config from config.yaml
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
         # PersistentObjectWatcher config
         pw_cfg = config.get('persistentwatcher', {})
         self.pw_roi = pw_cfg.get('roi', None)
-        self.pw_time_threshold = pw_cfg.get('time_threshold', 5.0)
-        self.pw_smoothing_window = pw_cfg.get('smoothing_window', 10)
+        self.pw_time_threshold = pw_cfg.get('time_threshold', 1.0)
+        self.pw_smoothing_window = pw_cfg.get('smoothing_window', 7)
         self.pw_alpha = pw_cfg.get('alpha', 0.8)
-        self.pw_motion_threshold = pw_cfg.get('motion_threshold', 0.01)
+        self.pw_motion_threshold = pw_cfg.get('motion_threshold', 0.1)
         self.pw_disappearance_window = pw_cfg.get('disappearance_window', 10)
         self.pw_target_classes = pw_cfg.get('target_classes', [])
         self.display_scale = pw_cfg.get('display_scale', 1.0)
@@ -36,9 +39,9 @@ class UnifiedWatcher:
         self.pw_min_low_frames = pw_cfg.get('min_low_frames', 3)
         self.pw_high_similarity_threshold = pw_cfg.get('high_similarity_threshold', 0.8)
         self.pw_low_similarity_threshold = pw_cfg.get('low_similarity_threshold', 0.5)
-        self.pw_min_immobility_duration = pw_cfg.get('min_immobility_duration', 3)
-        self.pw_min_high_frames = pw_cfg.get('min_high_frames', 3)
-
+        self.pw_min_immobility_duration = pw_cfg.get('min_immobility_duration', 1.5)
+        self.pw_min_high_frames = pw_cfg.get('min_high_frames', 6)
+        self.min_area_ratio= pw_cfg.get('min_area_ratio', 0.1)
 
         # SimpleTracking config
         st_cfg = config.get('simpletracking', {})
@@ -84,7 +87,7 @@ class UnifiedWatcher:
         cap.release()
         return (width, height)
 
-    # ---------------------- Utilitaires ----------------------
+    # ---------------------- Utils ----------------------
     def _bbox_center(self, bbox: List[int]) -> Tuple[float, float]:
         x1, y1, x2, y2 = bbox
         return (x1 + x2) / 2, (y1 + y2) / 2
@@ -99,6 +102,7 @@ class UnifiedWatcher:
         self.st_positions[cls].append(smoothed)
         return smoothed
 
+    # Detect if an object of a certain class is moving significantly
     def _detect_movement_pattern(self, cls: str, center: Tuple[float, float]) -> bool:
         if len(self.st_positions[cls]) < 2:
             return False
@@ -110,10 +114,11 @@ class UnifiedWatcher:
         self.st_deviation_flags[cls].append(norm_dist > self.st_movement_threshold)
         return sum(self.st_deviation_flags[cls]) >= self.st_min_movement_count
 
-    @staticmethod
-    def compute_mask_similarity(fg_mask, prev_mask, min_area_ratio=0.15):
+
+    # Compute the similarity between two masks, allowing to detect if there is an immobility sequence
+    def compute_mask_similarity(self,fg_mask, prev_mask):
         total_area = fg_mask.shape[0] * fg_mask.shape[1]
-        min_pixels = int(total_area * min_area_ratio)
+        min_pixels = int(total_area * self.min_area_ratio)
         intersection = cv2.bitwise_and(fg_mask, prev_mask)
         union = cv2.bitwise_or(fg_mask, prev_mask)
         intersection_area = cv2.countNonZero(intersection)
@@ -159,7 +164,8 @@ class UnifiedWatcher:
             for cls in self.st_target_classes
         }
 
-        # --- Background reference frame pour immobility ---
+        # --- Background reference frame for immobility ---
+        # --- ! Must be choosen carefully to get an empty background ! ---
         background_frame = None
         for idx, _, frame in decoder.frames():
             if idx == self.pw_background_frame_index:
@@ -169,10 +175,6 @@ class UnifiedWatcher:
         x1, y1, x2, y2 = self.pw_roi if self.pw_roi else (0,0,background_frame.shape[1], background_frame.shape[0])
         bg_roi = background_frame[y1:y2, x1:x2]
 
-        # Detection state
-        prev_mask = None
-        similarity_window = deque(maxlen=self.pw_window_size)
-        
         last_timestamp = 0.0
 
         # --- Iteration on frames ---
@@ -187,7 +189,7 @@ class UnifiedWatcher:
             gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
             gray_diff = cv2.GaussianBlur(gray_diff, (5,5),0)
             _, fg_mask = cv2.threshold(gray_diff,30,255,cv2.THRESH_BINARY)
-            sim = self.compute_mask_similarity(fg_mask, self.pw_prev_mask, min_area_ratio=0.1) if self.pw_prev_mask is not None else 0.0
+            sim = self.compute_mask_similarity(fg_mask, self.pw_prev_mask) if self.pw_prev_mask is not None else 0.0
             self.pw_prev_mask = fg_mask.copy()
             self.pw_similarity_window.append(sim)
 
@@ -299,7 +301,7 @@ class UnifiedWatcher:
                 combined_display = np.hstack((vis_frame1, vis_frame2))
 
                 cv2.imshow("Detections", combined_display)
-                key = cv2.waitKey(int(1000 / fps)) & 0xFF
+                key = cv2.waitKey(int(fps)) & 0xFF
                 if key == ord('q'):
                     break
                 elif key == ord(' '):  # Space bar: pause and step through frames
@@ -314,6 +316,7 @@ class UnifiedWatcher:
                         break
 
         #Close ongoing immobility at video end:
+
         if self.pw_immobile and self.pw_immobile_start_frame is not None:
             duration = last_timestamp - self.pw_immobile_start_timestamp
             if duration >= self.pw_min_immobility_duration:
@@ -329,7 +332,8 @@ class UnifiedWatcher:
             self.pw_immobile_start_timestamp = None
             self.pw_immobile = False
 
-        # Close active movements
+        # Close active movements at the end of video
+        
         for cls, cls_state in movement_info.items():
             if cls_state["_active"]:
                 last_frame = self.st_tracking_data[cls][-1]["frame_idx"]
