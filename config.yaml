@@ -2,8 +2,8 @@
 
 simpletracking:
   video_path: "videos/video_CarrefourSP_TBE1_20250916T195008_15.mp4"
-  target_classes: ["scanner", "rag", 'plastic-bag']
-  roi: [[646, 164, 848, 301], [400, 400, 600, 600]]   # Optionnal (leave None : ROI=Full frame)
+  target_classes: ["scanner", "rag", 'plastic-bag', 'hand']
+  roi: [[474, 238, 714, 386], [710, 248, 865, 469]]   # Optionnal (leave None : ROI=Full frame)
   frame_skip: 0
   resize: None   # Optionnal
   movement_threshold: 0.01
@@ -11,7 +11,7 @@ simpletracking:
   alpha: 0.8
   min_movement_count: 7
   movement_window: 9
-  display_scale: 1.0
+  display_scale: 0.5
 
 detector:
   model_path: "models/final_best_103.pt"
@@ -32,13 +32,14 @@ persistentwatcher:
     - products
     - scanner
     - rag
-  roi: [688, 333, 793, 399]
+  roi: [526, 234, 644, 298]
   time_threshold: 1.0
   smoothing_window: 7
   alpha: 0.8
-  display_scale: 1.0
+  display_scale: 0.5
   motion_threshold: 0.1       
   stability_time: 2.0         
   alert_time: 2.0             
-  display_scale: 1.0
   disappearance_window: 10
+  background_frame_index: 0
+  window_size: 7

@@ -70,21 +70,6 @@ class PersistentObjectWatcher:
         x1, y1, x2, y2 = bbox
         return (x1 + x2) / 2, (y1 + y2) / 2
     
-    @staticmethod
-    def ioa(bbox: List[int], roi: List[int]) -> float:
-        #intersection_over_smallest_area
-        ix1 = max(bbox[0], roi[0])
-        iy1 = max(bbox[1], roi[1])
-        ix2 = min(bbox[2], roi[2])
-        iy2 = min(bbox[3], roi[3])
-        intersection_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-        bbox_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        roi_area = (roi[2] - roi[0]) * (roi[3] - roi[1])
-        smallest_area = min(bbox_area, roi_area)
-        if smallest_area == 0:
-            return 0.0
-
-        return intersection_area / smallest_area
     @profiled
     def _is_inside_roi(self, bbox: List[int]) -> bool:
         if self.roi is None:
@@ -93,10 +78,6 @@ class PersistentObjectWatcher:
         rx1, ry1, rx2, ry2 = self.roi
         return not (x2 < rx1 or x1 > rx2 or y2 < ry1 or y1 > ry2)
     
-    def is_sufficiently_in_roi(self, bbox: List[int]) -> bool:
-        if self.ioa(bbox, self.roi) < 0.5:
-            return False
-        return True
 
     @staticmethod
     def compute_mask_similarity(fg_mask, prev_mask,min_area_ratio=0.1):
@@ -498,6 +479,6 @@ class PersistentObjectWatcher:
 if __name__ == "__main__":
     config_path='config.yaml'
     detector=Detector(config_path)
-    scale_detection=PersistentObjectWatcher(config_path, detector, 'videos/video_CarrefourSP_TBE1_20250917T164539_16.mp4')
+    scale_detection=PersistentObjectWatcher(config_path, detector, 'videos/video_test_CarrefourSP_TBE1_20250924T155916_2.mp4')
     result=scale_detection.detect_immobility_with_classification(show_video=False)
     print(result)
