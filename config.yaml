@@ -32,7 +32,8 @@ persistentwatcher:
     - products
     - scanner
     - rag
-  roi: [526, 234, 644, 298]
+    - hand
+  roi: [526, 234, 644, 298]       # Optionnal leave None to run on full frame
   time_threshold: 1.0
   smoothing_window: 7
   alpha: 0.8
@@ -47,3 +48,4 @@ persistentwatcher:
   min_immobility_duration: 1.5
   high_similarity_threshold: 0.9
   low_similarity_threshold: 0.7
+  min_class_count: 4

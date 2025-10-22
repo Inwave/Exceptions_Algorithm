@@ -42,6 +42,7 @@ class UnifiedWatcher:
         self.pw_min_immobility_duration = pw_cfg.get('min_immobility_duration', 1.5)
         self.pw_min_high_frames = pw_cfg.get('min_high_frames', 6)
         self.min_area_ratio= pw_cfg.get('min_area_ratio', 0.1)
+        self.pw_min_class_count = pw_cfg.get('min_class_count', 4)
 
         # SimpleTracking config
         st_cfg = config.get('simpletracking', {})
@@ -126,11 +127,23 @@ class UnifiedWatcher:
         if union_area < min_pixels:
             return 0.0
         return intersection_area / union_area
-
-    def _is_inside_roi(self, bbox: List[int], roi: Optional[List[List[int]]]) -> bool:
+    
+    # Check if a bbox is inside a single roi
+    def _is_inside_roi(self, bbox: List[int], roi:Optional[List[int]]) -> bool:
         if roi is None:
             return True
         x1, y1, x2, y2 = bbox
+        rx1, ry1, rx2, ry2 = roi
+        if not (x2 < rx1 or x1 > rx2 or y2 < ry1 or y1 > ry2):
+            return True
+        return False
+    
+    #Check if a bbox is inside an union of rois
+    def _is_inside_rois(self, bbox: List[int], roi:Optional[List[List[int]]]) -> bool:
+        if roi is None:
+            return True
+        x1, y1, x2, y2 = bbox
+    
         for r in roi:
             rx1, ry1, rx2, ry2 = r
             if not (x2 < rx1 or x1 > rx2 or y2 < ry1 or y1 > ry2):
@@ -176,7 +189,9 @@ class UnifiedWatcher:
         bg_roi = background_frame[y1:y2, x1:x2]
 
         last_timestamp = 0.0
-
+        pw_sequence_idx=0
+        st_sequence_idx=0
+        pw_classes_in_sequence={'detected_classes': {},'primary_class':None}
         # --- Iteration on frames ---
         for idx, timestamp, frame in decoder.frames():
             vis_frame1 = frame.copy()
@@ -201,12 +216,14 @@ class UnifiedWatcher:
                     self.pw_immobile = True
                     self.pw_immobile_start_frame = idx - 6
                     self.pw_immobile_start_timestamp = timestamp - 6 / fps
+                    
 
                 elif self.pw_immobile and low_count >= self.pw_min_low_frames:
                     self.pw_immobile = False
                     duration = timestamp - self.pw_immobile_start_timestamp
                     if duration >= self.pw_min_immobility_duration:
-                        self.pw_sequences.append({'start_frame': self.pw_immobile_start_frame,
+                        self.pw_sequences.append({'sequence_idx': pw_sequence_idx,
+                                                  'start_frame': self.pw_immobile_start_frame,
                                                   'end_frame': idx,
                                                   'start_timestamp': self.pw_immobile_start_timestamp,
                                                   'end_timestamp': timestamp,
@@ -214,11 +231,45 @@ class UnifiedWatcher:
 
                     self.pw_immobile_start_frame = None
                     self.pw_immobile_start_timestamp = None
+                    pw_sequence_idx += 1
 
-            # --- SimpleTracking ---
+            # --- YOLO Detections ---
             detections = self.detector.detect_frame(frame)
+            for cls in self.pw_target_classes:
+                
+            # Running classification on immobility sequences
+                if self.pw_immobile or pw_sequence_idx!=st_sequence_idx:
+                    
+                    pw_detections=[d for d in detections if d['class_name']==cls and self._is_inside_roi(d['bbox'], self.pw_roi)]
+                    if not pw_detections:
+                        continue
+                    pw_target = max(pw_detections, key=lambda d: d['conf'])
+                    bbox = pw_target['bbox']
+                    if pw_target['class_name'] in pw_classes_in_sequence['detected_classes']:
+                        pw_classes_in_sequence['detected_classes'][pw_target['class_name']]+=1
+                    else:
+                        pw_classes_in_sequence['detected_classes'][pw_target['class_name']]=1
+
+                    if pw_sequence_idx!=st_sequence_idx:  # End of sequence
+                        if pw_classes_in_sequence['detected_classes']:
+                            pw_classes_in_sequence['primary_class'] = max(pw_classes_in_sequence['detected_classes'], key=pw_classes_in_sequence['detected_classes'].get)
+                        self.pw_sequences[st_sequence_idx]['detected_classes']=pw_classes_in_sequence['detected_classes']
+                        self.pw_sequences[st_sequence_idx]['primary_class']=pw_classes_in_sequence['primary_class']
+                        pw_classes_in_sequence={'detected_classes': {},'primary_class':None}
+                        st_sequence_idx+=1
+                    if show_video:
+
+                    # Tracker visualization:
+
+                        cv2.rectangle(vis_frame2, (bbox[0], bbox[1]), (bbox[2], bbox[3]), self.class_colors[cls], 2)
+                        cv2.putText(vis_frame2, f"class {pw_target['class_name']}", (bbox[0] + 10, bbox[1] - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, self.class_colors[cls], 2)
+
+
             for cls in self.st_target_classes:
-                target_dets = [d for d in detections if d['class_name']==cls and self._is_inside_roi(d['bbox'], self.st_roi)]
+
+                # Simple Tracking
+                target_dets = [d for d in detections if d['class_name']==cls and self._is_inside_rois(d['bbox'], self.st_roi)]
                 if not target_dets:
                     continue
                 
@@ -363,6 +414,13 @@ class UnifiedWatcher:
         if writer:
             writer.release()
         cv2.destroyAllWindows()
+
+        # Filter out sequences with little detections
+
+        self.pw_sequences = [
+            seq for seq in self.pw_sequences
+            if seq['detected_classes'].get(seq['primary_class'], 0) >= self.pw_min_class_count
+        ]
 
         return {"persistentwatcher": self.pw_sequences, "simpletracking": movement_info}
 
