@@ -1,0 +1,24 @@
+### ROIs Infos for tests ###
+
+
+Carrefour PDV 14:
+scaling roi: [514, 296, 611, 357]
+noscan rois: [475, 294, 635, 404], [701, 320, 840, 502]
+background frame: background_pdv14.jpg
+
+
+Carrefour PDV 15:
+scaling roi: [714, 235, 808, 297]
+noscan rois: [685, 206, 826, 301],[483, 159, 637, 347]
+background frame: background_pdv15.jpg
+
+
+Carrefour PDV 16:
+scaling roi: [692, 356, 800, 402]
+noscan rois: [671, 301, 834, 407],[489, 279, 622, 433]
+background frame: background_pdv16.jpg
+
+
+
+
+

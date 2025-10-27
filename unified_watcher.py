@@ -1,11 +1,14 @@
 import cv2
 import yaml
+import os
+import shutil
 import numpy as np
+from pathlib import Path
 from collections import deque, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 from frame_capture import FrameDecoder
 from detection_analysis import Detector
-from profiler import profiled
+from profiler import profiled, plot_profile_stats
 
 
 DEFAULT_COLORS = {
@@ -16,16 +19,17 @@ DEFAULT_COLORS = {
 # Class regrouping the tracking algorithm and the immobility-detection algorithm
 # Run simultaneously both on each frame
 class UnifiedWatcher:
-    def __init__(self, config_path: str, detector: Any, video_path: str):
-        self.video_path = video_path
+    def __init__(self, config_path: str, detector: Any):
         self.detector = detector
 
         # load config from config.yaml
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+        self.img_size = config.get('img_size', 640) # Image size, should be the same as the one used for training for better results.
         
         # PersistentObjectWatcher config
         pw_cfg = config.get('persistentwatcher', {})
+        self.background_frame = cv2.imread(pw_cfg.get('background_frame_path')) if pw_cfg.get('background_frame_path') else None
         self.pw_roi = pw_cfg.get('roi', None)
         self.pw_time_threshold = pw_cfg.get('time_threshold', 1.0)
         self.pw_smoothing_window = pw_cfg.get('smoothing_window', 7)
@@ -43,6 +47,7 @@ class UnifiedWatcher:
         self.pw_min_high_frames = pw_cfg.get('min_high_frames', 6)
         self.min_area_ratio= pw_cfg.get('min_area_ratio', 0.1)
         self.pw_min_class_count = pw_cfg.get('min_class_count', 4)
+        self.pw_roi_threshold = pw_cfg.get('roi_threshold', 0.3)
 
         # SimpleTracking config
         st_cfg = config.get('simpletracking', {})
@@ -70,17 +75,15 @@ class UnifiedWatcher:
         self.st_tracking_data = {cls: [] for cls in self.st_target_classes}
         self.st_class_colors = DEFAULT_COLORS
         self.st_alert_messages = {cls: f"MOVEMENT DETECTED: {cls.upper()}!" for cls in self.st_target_classes}
-
-        # Video resolution
-        self.width, self.height = self._get_video_resolution()
+        
         self.alert_messages = {
             cls: f"MOVEMENT DETECTED: {cls.upper()}!" for cls in self.st_target_classes
         }
         self.class_colors = DEFAULT_COLORS
 
-
-    def _get_video_resolution(self):
-        cap = cv2.VideoCapture(self.video_path)
+    @profiled
+    def _get_video_resolution(self, video_path:str=None):
+        cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return None
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -117,6 +120,7 @@ class UnifiedWatcher:
 
 
     # Compute the similarity between two masks, allowing to detect if there is an immobility sequence
+    @profiled
     def compute_mask_similarity(self,fg_mask, prev_mask):
         total_area = fg_mask.shape[0] * fg_mask.shape[1]
         min_pixels = int(total_area * self.min_area_ratio)
@@ -137,6 +141,32 @@ class UnifiedWatcher:
         if not (x2 < rx1 or x1 > rx2 or y2 < ry1 or y1 > ry2):
             return True
         return False
+
+# Check if a bbox is significantly inside a single roi
+    def _is_significantly_inside_roi(self, bbox: List[int], roi:Optional[List[int]]) -> bool:
+        if roi is None:
+            return True
+        x1, y1, x2, y2 = bbox
+        rx1, ry1, rx2, ry2 = roi
+
+        inter_x1 = max(x1, rx1)
+        inter_y1 = max(y1, ry1)
+        inter_x2 = min(x2, rx2)
+        inter_y2 = min(y2, ry2)
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+
+        bbox_area = max(0, (x2 - x1)) * max(0, (y2 - y1))
+        roi_area = max(0, (rx2 - rx1)) * max(0, (ry2 - ry1))
+
+        if bbox_area == 0 or roi_area == 0:
+            return False
+
+        min_area = min(bbox_area, roi_area)
+        ratio = inter_area / min_area
+
+        return ratio > self.pw_roi_threshold
     
     #Check if a bbox is inside an union of rois
     def _is_inside_rois(self, bbox: List[int], roi:Optional[List[List[int]]]) -> bool:
@@ -152,12 +182,13 @@ class UnifiedWatcher:
     
 
 
-    # ---------------------- Detection on frames ----------------------
-    def run(self, show_video: bool = False, save_path: Optional[str] = None):
-        print(self.display_scale)
-        decoder = FrameDecoder(self.video_path, frame_skip=self.st_frame_skip, resize=self.st_resize)
+    # ---------------------- Detection on frames, this version allows visualization for debugging ----------------------
+    @profiled
+    def runv1(self, show_video: bool = False, save_path: Optional[str] = None, video_path:str=None):
+        decoder = FrameDecoder(video_path, frame_skip=self.st_frame_skip, resize=self.st_resize)
         fps = decoder.fps or 16
-
+        self.width, self.height = self._get_video_resolution(video_path=video_path)
+        
         writer = None
         if save_path:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -240,7 +271,7 @@ class UnifiedWatcher:
             # Running classification on immobility sequences
                 if self.pw_immobile or pw_sequence_idx!=st_sequence_idx:
                     
-                    pw_detections=[d for d in detections if d['class_name']==cls and self._is_inside_roi(d['bbox'], self.pw_roi)]
+                    pw_detections=[d for d in detections if d['class_name']==cls and self._is_significantly_inside_roi(d['bbox'], self.pw_roi)]
                     if not pw_detections:
                         continue
                     pw_target = max(pw_detections, key=lambda d: d['conf'])
@@ -423,10 +454,297 @@ class UnifiedWatcher:
         ]
 
         return {"persistentwatcher": self.pw_sequences, "simpletracking": movement_info}
+    
+    def run_on_folder(self, folder_path: str, show_video: bool = False):
+        video_files = [f for f in os.listdir(folder_path) if f.endswith(".mp4")]
+        results={}
+        for video_file in video_files:
+            print(video_file)
+            video_path = os.path.join(folder_path, video_file)
+            print(video_path)
+            results[video_file] = self.run(video_path, show_video)
+        return results
+    def run(self, video_path: str = None, save_path: Optional[str] = None):
+        decoder = FrameDecoder(video_path, frame_skip=self.st_frame_skip, resize=self.st_resize)
+        self.fps = decoder.fps or 16
+        self.width, self.height = self._get_video_resolution(video_path=video_path)
 
+        # Préparation
+        self.movement_info = {
+            cls: {
+                "detected": False,
+                "movement_count": 0,
+                "movements": [],
+                "_active": False,
+                "_start_frame": None,
+                "_start_time": None
+            }
+            for cls in self.st_target_classes
+        }
+
+        # Default background frame selction
+        if self.background_frame is None:
+            print('No path for background frame, using first frame')
+            for idx, _, frame in decoder.frames():
+                if idx == self.pw_background_frame_index:
+                    self.background_frame = frame.copy()
+                    break
+
+        self.background_frame = cv2.resize(self.background_frame, (self.img_size, self.img_size), interpolation=cv2.INTER_AREA)
+        last_timestamp = 0.0
+        self.pw_sequence_idx = 0
+        self.st_sequence_idx = 0
+        self.pw_classes_in_sequence = {'detected_classes': {}, 'primary_class': None}
+
+        # --- Boucle principale ---
+        for idx, timestamp, frame in decoder.frames():
+            last_timestamp = timestamp
+            (
+                self.movement_info,
+                self.pw_sequence_idx,
+                self.st_sequence_idx,
+                self.pw_classes_in_sequence
+            ) = self.process_frame(
+                idx, timestamp, frame, 
+                self.movement_info,
+                self.background_frame
+            ) 
+
+        #Close ongoing immobility at video end:
+        if self.pw_immobile and self.pw_immobile_start_frame is not None:
+            duration = last_timestamp - self.pw_immobile_start_timestamp
+            if duration >= self.pw_min_immobility_duration:
+                self.pw_sequences.append({
+                    'start_frame': self.pw_immobile_start_frame,
+                    'end_frame': idx,
+                    'start_timestamp': self.pw_immobile_start_timestamp,
+                    'end_timestamp': last_timestamp,
+                    'duration': duration
+                })
+
+            self.pw_immobile_start_frame = None
+            self.pw_immobile_start_timestamp = None
+            self.pw_immobile = False
+
+        for cls, cls_state in self.movement_info.items():
+            if cls_state["_active"]:
+                last_frame = self.st_tracking_data[cls][-1]["frame_idx"]
+                last_time = self.st_tracking_data[cls][-1]["timestamp"]
+                start_frame = cls_state["_start_frame"]
+                start_time = cls_state["_start_time"]
+                duration_s = last_time - start_time
+                frame_count = last_frame - start_frame + 1
+                cls_state["movements"].append({
+                    "start_frame": start_frame,
+                    "end_frame": last_frame,
+                    "start_timestamp": start_time,
+                    "end_timestamp": last_time,
+                    "duration_s": duration_s,
+                    "frame_count": frame_count
+                })
+                cls_state["movement_count"] += 1
+                cls_state["detected"] = True
+
+            # Deletion of internal variables
+            del cls_state["_active"]
+            del cls_state["_start_frame"]
+            del cls_state["_start_time"]
+        
+        return {
+            "movement_info": self.movement_info,
+            "pw_sequences": self.pw_sequences
+        }
+
+    @profiled
+    def process_frame(
+        self, idx, timestamp, frame, movement_info,
+        background_frame
+    ):
+        
+        frame = cv2.resize(frame, (self.img_size, self.img_size), interpolation=cv2.INTER_AREA)
+        # --- PersistentObjectWatcher immobility ---
+        self.process_pw(background_frame=background_frame, frame=frame, timestamp=timestamp, idx=idx)
+
+        # --- YOLO detections ---
+        self.detections = self.detect(frame)
+
+        # --- Persistent watcher classification ---
+        self.process_pw_classification()
+
+        # Simple Tracking            
+        self.process_st(timestamp=timestamp, idx=idx)
+        
+        
+        
+
+        return movement_info, self.pw_sequence_idx, self.st_sequence_idx, self.pw_classes_in_sequence
+    @profiled
+    def detect(self, frame):
+        detections = self.detector.detect_frame(frame)
+        return detections
+    @profiled
+    def process_pw(self, background_frame, frame,timestamp,idx):
+        x1, y1, x2, y2 = self.pw_roi if self.pw_roi else (0, 0, background_frame.shape[1], background_frame.shape[0])
+        bg_roi = background_frame[y1:y2, x1:x2]
+        print(bg_roi)
+
+        roi_frame = frame[y1:y2, x1:x2]
+        diff = cv2.absdiff(roi_frame, bg_roi)
+        print(diff)
+        gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+        gray_diff = cv2.GaussianBlur(gray_diff, (5, 5), 0)
+        _, fg_mask = cv2.threshold(gray_diff, 30, 255, cv2.THRESH_BINARY)
+
+        sim = self.compute_mask_similarity(fg_mask, self.pw_prev_mask) if self.pw_prev_mask is not None else 0.0
+        self.pw_prev_mask = fg_mask.copy()
+        self.pw_similarity_window.append(sim)
+
+        if len(self.pw_similarity_window) >= 7:
+            high_count = sum(1 for s in self.pw_similarity_window if s >= self.pw_high_similarity_threshold)
+            low_count = sum(1 for s in self.pw_similarity_window if s < self.pw_low_similarity_threshold)
+
+            if not self.pw_immobile and high_count >= self.pw_min_high_frames:
+                self.pw_immobile = True
+                self.pw_immobile_start_frame = idx - 6
+                self.pw_immobile_start_timestamp = timestamp - 6 / self.fps
+
+            elif self.pw_immobile and low_count >= self.pw_min_low_frames:
+                self.pw_immobile = False
+                duration = timestamp - self.pw_immobile_start_timestamp
+                if duration >= self.pw_min_immobility_duration:
+                    self.pw_sequences.append({
+                        'sequence_idx': self.pw_sequence_idx,
+                        'start_frame': self.pw_immobile_start_frame,
+                        'end_frame': idx,
+                        'start_timestamp': self.pw_immobile_start_timestamp,
+                        'end_timestamp': timestamp,
+                        'duration': duration
+                    })
+                self.pw_immobile_start_frame = None
+                self.pw_immobile_start_timestamp = None
+                self.pw_sequence_idx += 1
+    def process_pw_classification(self):
+        for cls in self.pw_target_classes:
+            if self.pw_immobile or self.pw_sequence_idx != self.st_sequence_idx:
+                pw_detections = [
+                    d for d in self.detections if d['class_name'] == cls and self._is_significantly_inside_roi(d['bbox'], self.pw_roi)
+                ]
+                if not pw_detections:
+                    continue
+                pw_target = max(pw_detections, key=lambda d: d['conf'])
+                if pw_target['class_name'] in self.pw_classes_in_sequence['detected_classes']:
+                    self.pw_classes_in_sequence['detected_classes'][pw_target['class_name']] += 1
+                else:
+                    self.pw_classes_in_sequence['detected_classes'][pw_target['class_name']] = 1
+
+                if self.pw_sequence_idx != self.st_sequence_idx:  # End of sequence
+                    if self.pw_classes_in_sequence['detected_classes']:
+                        self.pw_classes_in_sequence['primary_class'] = max(
+                            self.pw_classes_in_sequence['detected_classes'],
+                            key=self.pw_classes_in_sequence['detected_classes'].get
+                        )
+                    self.pw_sequences[self.st_sequence_idx]['detected_classes'] = self.pw_classes_in_sequence['detected_classes']
+                    self.pw_sequences[self.st_sequence_idx]['primary_class'] = self.pw_classes_in_sequence['primary_class']
+                    self.pw_classes_in_sequence = {'detected_classes': {}, 'primary_class': None}
+                    self.st_sequence_idx += 1
+    @profiled
+    def process_st(self, timestamp, idx):
+        for cls in self.st_target_classes:
+            target_dets = [d for d in self.detections if d['class_name'] == cls and self._is_inside_rois(d['bbox'], self.st_roi)]
+            if not target_dets:
+                continue
+            target = max(target_dets, key=lambda d: d['conf'])
+            bbox = target['bbox']
+            center = self._bbox_center(bbox)
+            smooth_center = self._smooth_position(cls, center)
+            self.st_tracking_data[cls].append({
+                "frame_idx": idx,
+                "timestamp": timestamp,
+                "bbox": bbox,
+                "center": smooth_center
+            })
+            moving = self._detect_movement_pattern(cls, smooth_center)
+            cls_state = self.movement_info[cls]
+
+            if moving and not cls_state['_active']:
+                cls_state['_active'] = True
+                cls_state['_start_frame'] = idx
+                cls_state['_start_time'] = timestamp
+            elif not moving and cls_state['_active']:
+                cls_state['_active'] = False
+                cls_state['movements'].append({
+                    "start_frame": cls_state['_start_frame'],
+                    "end_frame": idx,
+                    "start_time": cls_state['_start_time'],
+                    "end_time": timestamp
+                })
+                cls_state["movement_count"] += 1
+                cls_state["detected"] = True
+
+    def run_on_folder(self, folder_path):
+        """
+        Runs the unified watcher on a folder of videos.
+        """
+        folder_path = Path(folder_path)
+        results_dict = {}
+
+        for video_file in folder_path.glob("*.mp4"):
+            print(f"Running on video: {video_file.name}...")
+            result = self.run(str(video_file))
+            results_dict[video_file.name] = result
+
+        return results_dict
+    def sort_videos_by_detection(self, results_dict, source_folder, output_folder):
+        """
+        Sort videos according to detection alert
+        """
+
+        source_folder = Path(source_folder)
+        output_folder = Path(output_folder)
+        output_folder.mkdir(exist_ok=True, parents=True)
+
+        
+        movement_classes = ["scanner", "plastic-bag", "rag"]
+        immobility_classes = ["scanner", "plastic-bag", "rag", "products"]
+
+        for video_name, result in results_dict.items():
+            video_path = source_folder / video_name
+
+            if not video_path.exists():
+                print(f"Video not found: {video_name}")
+                continue
+
+            destinations = set()
+
+            # ---- Detected Movements ----
+            movement_info = result.get("movement_info", {})
+            for obj in movement_classes:
+                if movement_info.get(obj, {}).get("detected"):
+                    destinations.add(f"mvt_{obj}")
+
+            # ---- Immobility detected ----
+            pw_sequences = result.get("pw_sequences", [])
+            detected_classes = set()
+            for seq in pw_sequences:
+                detected_classes.update(seq.get("detected_classes", {}).keys())
+
+            for obj in immobility_classes:
+                if obj in detected_classes:
+                    destinations.add(f"immobility_{obj}")
+
+            # ---- copy video in each associated folder ----
+            for dest in destinations:
+                dest_path = output_folder / dest
+                dest_path.mkdir(exist_ok=True, parents=True)
+                shutil.copy2(video_path, dest_path / video_name)
+                print(f"📁 {video_name} → {dest_path}")
+
+        print("Done")
+    
 
 if __name__ == "__main__":
     detector=Detector("config.yaml")
-    unified_watcher = UnifiedWatcher("config.yaml", detector=detector, video_path="videos/video_test_CarrefourSP_TBE1_20250924T155916_2.mp4")
-    results=unified_watcher.run(show_video=True)
+    unified_watcher = UnifiedWatcher("config.yaml", detector=detector)
+    results=unified_watcher.run(video_path="videos/PDV14/video_CarrefourSP_TBE1_20250917T165605_14.mp4")
     print(results)
+    plot_profile_stats(smoothing_window=5)

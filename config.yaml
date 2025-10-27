@@ -1,9 +1,8 @@
 # Config file 
 
 simpletracking:
-  video_path: "videos/video_CarrefourSP_TBE1_20250916T195008_15.mp4"
   target_classes: ["scanner", "rag", 'plastic-bag']
-  roi: [[474, 238, 714, 386], [710, 248, 865, 469]]   # Optionnal (leave None : ROI=Full frame)
+  roi: [[475, 294, 635, 404], [701, 320, 840, 502]]   # Optionnal (leave None : ROI=Full frame)
   frame_skip: 0
   resize: None   # Optionnal
   movement_threshold: 0.01
@@ -14,7 +13,7 @@ simpletracking:
   display_scale: 0.5
 
 detector:
-  model_path: "models/final_best_103.pt"
+  model_path: "models/final_best.pt"
   conf_threshold: 0.35  
   device: 'cpu'
 
@@ -22,18 +21,18 @@ verdict:
   min_duration: 0.5
   self.min_movement_count: 1
 
+img_size: 416
 
 persistentwatcher:
-  model_path: "models/final_best_103.pt"
+  background_frame_path: "utils/backgrounds/background_pdv14.jpg"
+  model_path: "models/final_best.pt"
   conf_threshold: 0.35  
   device: 'cpu'
   target_classes:
     - plastic-bag
     - products
-    - scanner
     - rag
-    - hand
-  roi: [526, 234, 644, 298]       # Optionnal leave None to run on full frame
+  roi: [514, 296, 611, 357]      
   time_threshold: 1.0
   smoothing_window: 7
   alpha: 0.8
@@ -49,3 +48,4 @@ persistentwatcher:
   high_similarity_threshold: 0.9
   low_similarity_threshold: 0.7
   min_class_count: 4
+  roi_threshold: 0.3

@@ -11,7 +11,10 @@ videos/
 run.py
 tracking_module.py
 trajectory_visualizer.py
-
+sorted_videos/
+run_simple_tracking.py
+run_rtsp.py
+verdict.py
 
 # Distribution / packaging
 .Python

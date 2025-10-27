@@ -58,7 +58,8 @@ def select_frame_for_roi(cap):
 
 def select_roi_from_frame(frame):
     clone = frame.copy()
-    cv2.putText(clone, "  Select Roi and press enter",
+    h, w = frame.shape[:2]
+    cv2.putText(clone, "Select ROI and press Enter",
                 (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
     roi = cv2.selectROI("ROI Selector", clone, fromCenter=False, showCrosshair=True)
@@ -68,11 +69,19 @@ def select_roi_from_frame(frame):
         print("No ROI Selected")
         return None
 
-    x, y, w, h = roi
-    x1, y1, x2, y2 = int(x), int(y), int(x + w), int(y + h)
-    print(f"\nROI selected : (x1={x1}, y1={y1}, x2={x2}, y2={y2})\n")
-    return [x1, y1, x2, y2]
+    x, y, rw, rh = roi
+    x1, y1, x2, y2 = x, y, x + rw, y + rh
 
+    # --- Normalization (proportion) ---
+    roi_normalized = [
+        x1 / w,  # x1%
+        y1 / h,  # y1%
+        x2 / w,  # x2%
+        y2 / h   # y2%
+    ]
+
+    print(f"\nROI selected (normalized): {roi_normalized}\n")
+    return roi_normalized
 
 def main():
     parser = argparse.ArgumentParser(description="ROI Selector on RTSP stream or local video")

@@ -50,6 +50,7 @@ Two algorithms are run simultaneously on the frames, a movement tracking algorit
 
 3. **Background Substraction**  
    - Compute absolute binary mask difference between the current roi and a reference background 
+   - The reference background is currently a frame on the format .jpg where there is nothing in the scaling roi. This must be adapted for each Point of Sales, and this is one of the main issue for the integration part.
    - Compute the similarity between two following masks to detect immobility sequences
    - Keep the infos of an immobility sequence, with the starting and ending frames
 
