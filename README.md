@@ -68,19 +68,20 @@ Two algorithms are run simultaneously on the frames, a movement tracking algorit
 ---
 
 ## Current Implementation
-The current version supports:
+
+### The current version supports:
 - Multiple target classes, analyzed independently.
 - Multiple ROIs per scene.
 - Movement analysis based on a single, most confident detection per class and frame.
 - Immobility Detection based on a combined background substraction and YOLO model detection
 
-Limitations and Remarks:
+### Limitations and Remarks:
 
-- The performance of the algorithm is mainly based on the YOLO model performance, a certain attention should be given to the training part. An idea for imporvement would be to train a model for each store, improving performance but it would consume more time than a general model train once.
-- Sensitive to detection noise when multiple similar objects are present, or when there is false detections with high confidence.
-- A lot of parameters are specifics to each PDV and must then be configured for each one (background frames, different ROIs)
+- The performance of the algorithm is mainly based on the **YOLO model performance**, a certain attention should be given to the training part. An idea for improvement would be to train a model for each store, improving performance but then the integration would be more time-consuming than a general model train once.
+- Sensitive to detection noise when **multiple similar objects** are present, or when there is wrong detections with high confidence.
+- A lot of parameters are specifics to each POS (Point of Sales (can be found as PDV: Ponte De Venda)) and must then be configured for each one (background frames, different ROIs)
 - Config parameters performance can also differ between stores.
-- When running on CPU, the more time consuming function is the inference of the model detection (93% of the process_frame execution time). On CPU the inference time on a frame is on average around 130 ms, which correspond to around processing around 6 fps. Running on each frames (frame_skip=0), the running time is approximatively 150% time slower than the actual videos of interest. This might be an issue in the future insertion in the easinop algorithm if GPU use can be provided. Setting frame_skip=1 allows to be faster than the video fps, but might decrease algorithm robustness.
+- When running on CPU, the more time consuming function is the **inference of the model detection** (93% of the process_frame execution time). On CPU the inference time on a frame is on average around 130 ms, which correspond to around processing around 6 fps. Running on each frames (frame_skip=0), the running time is approximatively 150% time slower than the actual videos of interest. This might be an issue in the future insertion in the easinop algorithm if GPU use can be provided. Setting frame_skip=1 allows to be faster than the video fps, but might decrease algorithm robustness.
 
 
 Future work could include integration with established multi-object tracking frameworks such as **DeepSORT** or **ByteTrack** to handle object re-identification and improve tracking robustness.
@@ -102,8 +103,8 @@ Future work could include integration with established multi-object tracking fra
 3. **Add input videos**  
    - Place all videos to be processed in the **`videos/`** directory.
 
-4. **Configure point-of-view (POV) parameters**  
-   The **`utils/`** folder provides tools to configure POV-specific parameters for the videos:
+4. **Configure point-of-view (POS) parameters**  
+   The **`utils/`** folder provides tools to configure POS-specific parameters for the videos:
    - **`select_roi.py`** — define the Regions of Interest (ROIs) for scaling, scan, and drop-off areas.  
    - **`select_background.py`** — select and save the background image for the scaling area (saved as a `.jpg`).  
      Ensure you select a frame where the scaling area is clear (no objects or motion).
@@ -113,7 +114,7 @@ Future work could include integration with established multi-object tracking fra
    
        python3 unified_watcher.py
 
-   - To enable on-screen visualization, set `show_video=True` in the configuration file.
+   - To enable on-screen visualization, set `show_video=True` in the python file.
 
 6. **Adjust algorithm parameters**  
    Edit **`config.yaml`** to tune algorithm behavior, including:
