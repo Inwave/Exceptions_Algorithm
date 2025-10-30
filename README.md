@@ -82,6 +82,7 @@ Two algorithms are run simultaneously on the frames, a movement tracking algorit
 - A lot of parameters are specifics to each POS (Point of Sales (can be found as PDV: Ponte De Venda)) and must then be configured for each one (background frames, different ROIs)
 - Config parameters performance can also differ between stores.
 - When running on CPU, the more time consuming function is the **inference of the model detection** (93% of the process_frame execution time). On CPU the inference time on a frame is on average around 130 ms, which correspond to around processing around 6 fps. Running on each frames (frame_skip=0), the running time is approximatively 150% time slower than the actual videos of interest. This might be an issue in the future insertion in the easinop algorithm if GPU use can be provided. Setting frame_skip=1 allows to be faster than the video fps, but might decrease algorithm robustness.
+- When running on a  NVIDIA GeForce RTX 4060 GPU, the inference time is around 15x faster, which allows the algorithm to be run without frame skip in a very reasonnable time to be insered in easinop.
 
 
 Future work could include integration with established multi-object tracking frameworks such as **DeepSORT** or **ByteTrack** to handle object re-identification and improve tracking robustness.
