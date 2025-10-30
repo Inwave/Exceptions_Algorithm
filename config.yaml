@@ -1,42 +1,49 @@
 # Config file 
 
+
+img_size: 416
+class_colors:
+  scanner: [255, 0, 0]
+  hand: [0, 255, 0]
+  rag: [0, 0, 255]
+  plastic-bag: [255, 255, 0]
+  products: [0, 255, 255]
+  price-sheets: [255, 0, 255]
+
+
 simpletracking:
   target_classes: ["scanner", "rag", 'plastic-bag']
-  roi: [[475, 294, 635, 404], [701, 320, 840, 502]]   # Optionnal (leave None : ROI=Full frame)
-  frame_skip: 0
+  roi:  [[0.5140625, 0.24583333333333332, 0.6578125, 0.4097222222222222],[0.3703125, 0.21944444444444444, 0.4953125, 0.4652777777777778]]   # Optionnal (leave None : ROI=Full frame)
+  frame_skip: 1
   resize: None   # Optionnal
-  movement_threshold: 0.01
-  smoothing_window: 25
-  alpha: 0.8
-  min_movement_count: 7
-  movement_window: 9
+  movement_threshold: 0.005
+  smoothing_window: 50
+  alpha: 1
+  min_movement_count: 3
+  movement_window: 10
   display_scale: 0.5
+  
 
 detector:
-  model_path: "models/final_best.pt"
+  model_path: "models/final_best_103.pt"
   conf_threshold: 0.35  
   device: 'cpu'
 
-verdict:
-  min_duration: 0.5
-  self.min_movement_count: 1
-
-img_size: 416
 
 persistentwatcher:
-  background_frame_path: "utils/backgrounds/background_pdv14.jpg"
-  model_path: "models/final_best.pt"
+  background_frame_path: "utils/backgrounds/background_pdv15.jpg"
+  model_path: "models/final_best_103.pt"
   conf_threshold: 0.35  
   device: 'cpu'
   target_classes:
     - plastic-bag
     - products
     - rag
-  roi: [514, 296, 611, 357]      
+  roi: [0.5578125, 0.3472222222222222, 0.62890625, 0.41944444444444445]      
   time_threshold: 1.0
   smoothing_window: 7
   alpha: 0.8
-  display_scale: 0.5
+  display_scale: 0.7
   motion_threshold: 0.1       
   disappearance_window: 10
   background_frame_index: 0
@@ -46,6 +53,6 @@ persistentwatcher:
   min_low_frames: 3
   min_immobility_duration: 1.5
   high_similarity_threshold: 0.9
-  low_similarity_threshold: 0.7
-  min_class_count: 4
+  low_similarity_threshold: 0.8
+  min_class_count: 3
   roi_threshold: 0.3

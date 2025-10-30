@@ -2,18 +2,18 @@
 
 
 Carrefour PDV 14:
-scaling roi: [514, 296, 611, 357]
-noscan rois: [475, 294, 635, 404], [701, 320, 840, 502]
+scaling roi: [0.3984375, 0.4111111111111111, 0.4796875, 0.49583333333333335] 
+noscan rois:[[0.378125, 0.4152777777777778, 0.5109375, 0.5722222222222222], [0.53359375, 0.41944444444444445, 0.65078125, 0.7]]
 background frame: background_pdv14.jpg
 
 
-Carrefour PDV 15:
-scaling roi: [714, 235, 808, 297]
-noscan rois: [685, 206, 826, 301],[483, 159, 637, 347]
+Carrefour São Paulo PDV 15:
+scaling roi: [0.5578125, 0.3472222222222222, 0.62890625, 0.41944444444444445]
+noscan rois: [[0.5140625, 0.24583333333333332, 0.6578125, 0.4097222222222222],[0.3703125, 0.21944444444444444, 0.4953125, 0.4652777777777778]]
 background frame: background_pdv15.jpg
 
 
-Carrefour PDV 16:
+Carrefour São Paulo PDV 16:
 scaling roi: [692, 356, 800, 402]
 noscan rois: [671, 301, 834, 407],[489, 279, 622, 433]
 background frame: background_pdv16.jpg

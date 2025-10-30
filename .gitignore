@@ -14,7 +14,7 @@ trajectory_visualizer.py
 sorted_videos/
 run_simple_tracking.py
 run_rtsp.py
-verdict.py
+utils/background/
 
 # Distribution / packaging
 .Python

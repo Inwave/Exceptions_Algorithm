@@ -1,17 +1,20 @@
 # Exceptions_Algorithm
-Algortihm handling some of the wrong alerts of the easi-nop algorithm
+This algorithm handles some of the false positives alerts from the Easinop algorithm, which aims to reduce the number of misclassifications in shoplifting situations at store checkouts.
 
-Currently, the tracker operates as a **single-object tracker** per target class. It estimates motion based on the smoothed trajectory of bounding box centers. This version does not perform multi-object identity tracking, which could be planned for future development. A persistent object watcher has been implemented.
+Currently, the tracker operates as a **single-object tracker** per target class. It estimates motion based on the smoothed trajectory of bounding box centers. The tracker focuses on the alerts that can be raised because of scanner, plastic_bags or rag movement in the 'scanning area' or the 'drop-off area'. This version does not perform multi-object identity tracking, which could be planned for future development. A **persistent object watcher** is also implemented, focusing on the alerts that can be raised because of scaling operation in the 'scaling area' by the POS operator.
 
 ---
 
 ## Objectives
+
 - Filter object detections based on:
   - Target classes of interest.
   - Regions of Interest (ROIs) corresponding to specific operational zones.
 - Track the motion of detected objects over time.
 - Detect and confirm significant movement events.
+- Detect scaling operations of products that can raise a false alert, using mask similarities and YOLO model.
 - Provide visual feedback for debugging and validation purposes.
+
 
 ---
 
@@ -71,10 +74,56 @@ The current version supports:
 - Movement analysis based on a single, most confident detection per class and frame.
 - Immobility Detection based on a combined background substraction and YOLO model detection
 
-Limitations:
-- No multi-object tracking (i.e., no real persistent object identity: the actual persistent object identity relies the fact that the object with the most confident detection is the same, but it might not be the case).
-- Sensitive to detection noise when multiple similar objects are present.
+Limitations and Remarks:
 
-Future work includes integration with established multi-object tracking frameworks such as **DeepSORT** or **ByteTrack** to handle object re-identification and improve tracking robustness.
+- The performance of the algorithm is mainly based on the YOLO model performance, a certain attention should be given to the training part. An idea for imporvement would be to train a model for each store, improving performance but it would consume more time than a general model train once.
+- Sensitive to detection noise when multiple similar objects are present, or when there is false detections with high confidence.
+- A lot of parameters are specifics to each PDV and must then be configured for each one (background frames, different ROIs)
+- Config parameters performance can also differ between stores.
+- When running on CPU, the more time consuming function is the inference of the model detection (93% of the process_frame execution time). On CPU the inference time on a frame is on average around 130 ms, which correspond to around processing around 6 fps. Running on each frames (frame_skip=0), the running time is approximatively 150% time slower than the actual videos of interest. This might be an issue in the future insertion in the easinop algorithm if GPU use can be provided. Setting frame_skip=1 allows to be faster than the video fps, but might decrease algorithm robustness.
+
+
+Future work could include integration with established multi-object tracking frameworks such as **DeepSORT** or **ByteTrack** to handle object re-identification and improve tracking robustness.
 
 ---
+
+## How to use
+
+1. **Set up the virtual environment**  
+   To install the necessary dependencies and activate the virtual environment, run the following commands in a terminal:
+   
+       pipenv install --dev
+       pipenv shell
+
+2. **Prepare computer vision models**  
+   - Place the desired models inside the **`models/`** directory.  
+   - Register each model path in the **`config.yaml`** file.
+
+3. **Add input videos**  
+   - Place all videos to be processed in the **`videos/`** directory.
+
+4. **Configure point-of-view (POV) parameters**  
+   The **`utils/`** folder provides tools to configure POV-specific parameters for the videos:
+   - **`select_roi.py`** — define the Regions of Interest (ROIs) for scaling, scan, and drop-off areas.  
+   - **`select_background.py`** — select and save the background image for the scaling area (saved as a `.jpg`).  
+     Ensure you select a frame where the scaling area is clear (no objects or motion).
+
+5. **Run the main algorithm**  
+   Execute the following command to run the processing pipeline:
+   
+       python3 unified_watcher.py
+
+   - To enable on-screen visualization, set `show_video=True` in the configuration file.
+
+6. **Adjust algorithm parameters**  
+   Edit **`config.yaml`** to tune algorithm behavior, including:
+   - Model paths and types  
+   - Threshold values  
+   - Window sizes and other algorithm-specific parameters
+
+7. **Batch processing and video sorting**  
+   - Use the `run_on_folder` function to run the algorithm sequentially over multiple videos.  
+   - After processing, videos can be sorted into different folders based on detected alerts using the `sort_videos_by_detection` function.
+
+8. **Profiling and performance analysis**  
+   A profiling utility is provided to identify the most time-consuming parts of the code and support performance optimization.
